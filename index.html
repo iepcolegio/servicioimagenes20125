@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Buscador de Imágenes – 20125 NUESTRA SEÑORA DEL ROSARIO </title>
+  <meta name="description" content="Aplicación web en HTML, CSS y JavaScript para buscar imágenes libres en Wikimedia Commons sin API key." />
+  <link rel="preconnect" href="https://commons.wikimedia.org" crossorigin>
+  <style>
+    :root{
+      --bg:#0b1020; --card:#141a2e; --muted:#a7b0c0; --text:#e8ecf3; --brand:#7aa2ff;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Inter,Arial,sans-serif;
+      background:linear-gradient(180deg,#0b1020, #0b1020 35%, #0e1427 100%);
+      color:var(--text);
+    }
+
+    header{
+      position:sticky; top:0; z-index:10; backdrop-filter:saturate(1.2) blur(6px);
+      background:rgba(11,16,32,.65); border-bottom:1px solid rgba(255,255,255,.05);
+    }
+    .container{max-width:1100px; margin:0 auto; padding:18px}
+    .row{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
+
+    h1{font-size:clamp(18px,3vw,22px); margin:0; letter-spacing:.4px; font-weight:700}
+    .hint{color:var(--muted); font-size:12px}
+
+    .search{
+      flex:1 1 420px; display:flex; gap:8px; align-items:center; 
+      background:var(--card); border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:8px 10px;
+      box-shadow:0 1px 0 rgba(255,255,255,.04) inset, 0 8px 24px rgba(0,0,0,.25);
+    }
+    .search input{
+      flex:1; font-size:16px; color:var(--text); background:transparent; border:0; outline:none;
+      padding:10px 8px; min-width:160px;
+    }
+    .btn{
+      appearance:none; border:0; border-radius:12px; padding:10px 14px; cursor:pointer; font-weight:600;
+      background:linear-gradient(180deg,#7aa2ff,#4f7cff); color:#081228; transition:.2s transform ease, .2s opacity ease;
+    }
+    .btn[disabled]{opacity:.55; cursor:not-allowed}
+    .btn.secondary{background:#212a46; color:var(--text); border:1px solid rgba(255,255,255,.08)}
+    .btn:hover{transform:translateY(-1px)}
+
+    main{padding:16px}
+    .grid{
+      display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:12px; align-items:start;
+    }
+    .card{
+      background:var(--card); border:1px solid rgba(255,255,255,.08); border-radius:16px; overflow:hidden;
+      box-shadow:0 8px 28px rgba(0,0,0,.35);
+    }
+    .thumb{
+      display:block; width:100%; aspect-ratio:4/3; object-fit:cover; background:#0d1224;
+    }
+    .meta{padding:10px 12px}
+    .title{font-size:14px; font-weight:600; margin:0 0 6px; line-height:1.25}
+    .meta .row{justify-content:space-between}
+    .links{display:flex; gap:8px; flex-wrap:wrap}
+    .tiny{font-size:12px; color:var(--muted)}
+
+    .empty,.error,.loading{
+      text-align:center; color:var(--muted); padding:34px 8px; border:1px dashed rgba(255,255,255,.15);
+      border-radius:16px; background:rgba(255,255,255,.02);
+    }
+
+    footer{padding:22px 0 44px}
+    .center{display:flex; justify-content:center}
+
+    @media (hover:none){ .btn:hover{transform:none} }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <div class="row">
+        <h1>🔎 Buscador de Imágenes - Clik en abrir imagen para verlo </h1>
+        <span class="hint">Imágenes libres de uso educativo la carga suele demorar un poco</span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <form id="searchForm" class="search" role="search" aria-label="Buscar imágenes">
+          <input id="q" name="q" type="search" placeholder="Ej.: Machu Picchu, flores, mapas…" autocomplete="off" />
+          <button class="btn" id="goBtn" type="submit">Buscar</button>
+          <button class="btn secondary" id="clearBtn" type="button" title="Limpiar">Limpiar</button>
+        </form>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="state" class="empty">Escribe un término arriba y presiona <b>Buscar</b>.</div>
+    <section id="results" class="grid" hidden></section>
+    <footer id="loadMoreWrap" class="center" hidden>
+      <button class="btn" id="loadMore">Cargar más</button>
+    </footer>
+  </main>
+
+  <script>
+  // ======== Configuración API (Wikimedia Commons) ==========
+  // No se requiere API key. La búsqueda usa el namespace 6 (archivos) y devuelve miniaturas y enlaces.
+  const API = 'https://commons.wikimedia.org/w/api.php';
+
+  // Estado global simple
+  let lastQuery = '';
+  let continueToken = null;
+  let busy = false;
+
+  const $ = sel => document.querySelector(sel);
+  const resultsEl = $('#results');
+  const stateEl = $('#state');
+  const loadMoreWrap = $('#loadMoreWrap');
+  const loadMoreBtn = $('#loadMore');
+
+  function setState(message, kind='loading'){
+    stateEl.className = kind; stateEl.innerHTML = message; stateEl.hidden = false;
+  }
+  function showResults(){ stateEl.hidden = true; resultsEl.hidden = false; }
+  function showLoadMore(show){ loadMoreWrap.hidden = !show; }
+
+  function buildUrl(q, cont){
+    const p = new URLSearchParams({
+      action:'query', format:'json', origin:'*',
+      generator:'search', gsrsearch:q, gsrnamespace:'6', gsrlimit:'30',
+      prop:'imageinfo|info', inprop:'url',
+      iiprop:'url|extmetadata', iiurlwidth:'1200'
+    });
+    if(cont && cont.gsroffset!==undefined){
+      p.set('continue', cont.continue || '');
+      p.set('gsroffset', cont.gsroffset);
+      if(cont.iicontinue) p.set('iicontinue', cont.iicontinue);
+    }
+    return `${API}?${p.toString()}`;
+  }
+
+  function pageToCard(page){
+    const ii = (page.imageinfo && page.imageinfo[0]) || {};
+    const thumb = ii.thumburl || ii.url;
+    const original = ii.url;
+    const title = page.title?.replace(/^File:/,'') || 'Imagen';
+    const pageUrl = page.fullurl || `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title)}`;
+
+    const fig = document.createElement('article');
+    fig.className = 'card';
+    fig.innerHTML = `
+      <img class="thumb" src="${thumb}" alt="${title}" loading="lazy" referrerpolicy="no-referrer" />
+      <div class="meta">
+        <h3 class="title" title="${title}">${title}</h3>
+        <div class="row">
+          <div class="tiny">${(ii.extmetadata?.LicenseShortName?.value||'Licencia libre')}</div>
+        </div>
+        <div class="links" style="margin-top:8px">
+          <a class="btn secondary" href="${pageUrl}" target="_blank" rel="noopener">Ver página</a>
+          ${original?`<a class="btn" href="${original}" target="_blank" rel="noopener">Abrir imagen</a>`:''}
+        </div>
+      </div>`;
+    return fig;
+  }
+
+  async function search(q, isLoadMore=false){
+    if(busy) return; busy = true;
+    if(!isLoadMore){
+      resultsEl.innerHTML='';
+      continueToken=null;
+      showLoadMore(false);
+      setState('Buscando… 🔎', 'loading');
+    }
+    try{
+      const url = buildUrl(q, continueToken);
+      const res = await fetch(url);
+      if(!res.ok) throw new Error('Error de red');
+      const data = await res.json();
+
+      const pages = data.query?.pages ? Object.values(data.query.pages) : [];
+      // Ordenar por índice de búsqueda si existe
+      pages.sort((a,b)=> (a.index||0)-(b.index||0));
+
+      if(!pages.length && !isLoadMore){
+        setState('No se encontraron imágenes. Prueba con otro término o sé más específico.', 'empty');
+        busy=false; return;
+      }
+
+      // Pintar
+      if(pages.length){
+        showResults();
+        const frag = document.createDocumentFragment();
+        for(const p of pages){ frag.appendChild(pageToCard(p)); }
+        resultsEl.appendChild(frag);
+      }
+
+      // Continuación (paginación)
+      continueToken = data.continue || null;
+      showLoadMore(!!continueToken);
+
+      if(isLoadMore && !pages.length){
+        showLoadMore(false);
+      }
+
+      busy=false;
+    }catch(err){
+      console.error(err);
+      setState('Ocurrió un error al buscar. Revisa tu conexión e inténtalo de nuevo.', 'error');
+      busy=false;
+    }
+  }
+
+  // Eventos UI
+  $('#searchForm').addEventListener('submit', (e)=>{
+    e.preventDefault();
+    const q = $('#q').value.trim();
+    if(!q) return;
+    lastQuery = q;
+    search(q, false);
+  });
+
+  $('#clearBtn').addEventListener('click', ()=>{
+    $('#q').value=''; resultsEl.innerHTML=''; continueToken=null; showLoadMore(false);
+    setState('Escribe un término arriba y presiona <b>Buscar</b>.', 'empty');
+  });
+
+  loadMoreBtn.addEventListener('click', ()=>{
+    if(continueToken && lastQuery){ search(lastQuery, true); }
+  });
+
+  // Atajos
+  document.addEventListener('keydown', (e)=>{
+    if(e.key === '/' && document.activeElement.tagName !== 'INPUT'){
+      e.preventDefault(); $('#q').focus();
+    }
+  });
+
+  // Búsquedas sugeridas (opcional): cargar algo inicial si quieres
+  // search('Peru paisaje');
+  </script>
+</body>
+</html>
