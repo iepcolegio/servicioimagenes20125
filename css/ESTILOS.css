@@ -1,0 +1,34 @@
+
+body {
+	background: black;
+	}
+	
+		
+			#zona{
+				position: relative;
+		float: left;
+		left: 620px;
+		top:-520px;
+		border-radius: 100px;
+				}
+				img:hover{
+		transform: scale(1.2);
+	}
+
+video{
+				position: relative;
+		
+		top:-130px;
+		
+				}
+	iframe		
+{
+	width: 330px;
+	height: 160px;
+	position: relative;
+	float: left;
+	top:-320px;
+	left: 330px;
+	
+
+	}
