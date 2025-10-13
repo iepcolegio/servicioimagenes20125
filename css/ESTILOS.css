@@ -9,7 +9,7 @@ video{
 				position: relative;
 		
 		top:-70px;
-		max-width:620PX;
+		max-width:420PX;
 		 max-height:540PX;
 		
 				}
@@ -30,3 +30,4 @@ display: flex;
 		max-width: 160px;
 	}
 	
+
