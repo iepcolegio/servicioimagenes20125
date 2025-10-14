@@ -29,6 +29,11 @@ display: flex;
 		max-height: 350px;
 		max-width: 160px;
 	}
-	
+	audio{
+		width: 250px;
+		height: 48px;
+	}
+
+
 
 
